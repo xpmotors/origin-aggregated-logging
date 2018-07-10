@@ -140,7 +140,7 @@ def close_file(project)
     @log.debug "Closing file: #{file_name}"
     file.write(<<-CONF)
   time_format %Y-%m-%dT%H:%M:%S.%N%Z
-  tag kubernetes.*
+  tag time.kubernetes.*
   format json
   keep_time_key true
   read_from_head "#{ENV[READ_FROM_HEAD] || 'true'}"
@@ -162,7 +162,7 @@ def create_default_docker(excluded)
   path "#{ENV[CONT_LOGS_PATH] || '/var/log/containers/*.log'}"
   pos_file "#{ENV[POS_FILE] || '/var/log/es-containers.log.pos'}"
   time_format %Y-%m-%dT%H:%M:%S.%N%Z
-  tag kubernetes.*
+  tag time.kubernetes.*
   format #{ENV['USE_CRIO'] == 'true' ? '/^(?<time>.+) (?<stream>stdout|stderr)( (?<logtag>.))? (?<log>.*)$/' : 'json'}
   keep_time_key true
   read_from_head "#{ENV[READ_FROM_HEAD] || 'true'}"
