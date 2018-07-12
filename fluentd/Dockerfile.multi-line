@@ -1,0 +1,8 @@
+FROM openshift/origin-logging-fluentd:v3.9
+
+RUN gem install -N --conservative --minimal-deps --no-ri --no-doc \
+	fluent-plugin-detect-exceptions:0.0.11	
+
+COPY exception_detector.rb /opt/app-root/src/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+RUN chmod a+rx /opt/app-root/src/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+ADD generate_throttle_configs.rb ${HOME}/
