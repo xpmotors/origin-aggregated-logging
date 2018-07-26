@@ -1,0 +1,76 @@
+FROM xpmotors/centos:centos7-rb24
+
+MAINTAINER OpenShift Development <dev@lists.openshift.redhat.com>
+
+ENV DATA_VERSION=1.6.0 \
+    FLUENTD_VERSION=0.12.42 \
+    GEM_HOME=/opt/app-root/src \
+    HOME=/opt/app-root/src \
+    PATH=/opt/app-root/src/bin:/opt/app-root/bin:$PATH \
+    OCP_OPERATIONS_PROJECTS='default openshift openshift-'
+
+LABEL io.k8s.description="Fluentd container for collecting of docker container logs" \
+      io.k8s.display-name="Fluentd ${FLUENTD_VERSION}" \
+      io.openshift.expose-services="9200:http, 9300:http" \
+      io.openshift.tags="logging,elk,fluentd"
+
+# activesupport version 5.x requires ruby 2.2
+# iproute needed for ip command to get ip addresses
+# autoconf redhat-rpm-config for building jemalloc
+RUN rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 && \
+    yum install -y --setopt=tsflags=nodocs \
+      gcc-c++ \
+      ruby-devel \
+      libcurl-devel \
+      make \
+      bc \
+      iproute \
+      autoconf automake libtool m4 \
+      redhat-rpm-config && \
+    yum clean all
+
+RUN mkdir -p ${HOME} && mkdir -p /etc/fluent/plugin && \
+    gem install -N --conservative --minimal-deps --no-ri --no-doc \
+      activesupport \
+      public_suffix \
+     'elasticsearch-transport:<5' \
+     'elasticsearch-api:<5' \
+     'elasticsearch:<5' \
+      fluentd:${FLUENTD_VERSION} \
+     'fluent-plugin-elasticsearch' \
+      fluent-plugin-kubernetes_metadata_filter \
+      fluent-plugin-record-modifier \
+     'fluent-plugin-rewrite-tag-filter:1.6.0' \
+      fluent-plugin-secure-forward \
+      fluent-plugin-systemd \
+      fluent-plugin-viaq_data_model \
+     'fluent-plugin-remote-syslog:1.1' \
+     'fluent-plugin-detect-exceptions:0.0.11' \
+     'fluent-plugin-out-http:0.2.0'
+
+ADD configs.d/ /etc/fluent/configs.d/
+ADD filter_k8s_meta_for_mux_client.rb /etc/fluent/plugin/
+ADD out_syslog_buffered.rb out_syslog.rb /etc/fluent/plugin/
+ADD parser_viaq_docker_audit.rb viaq_docker_audit.rb /etc/fluent/plugin/
+ADD run.sh generate_throttle_configs.rb generate_syslog_config.rb ${HOME}/
+
+COPY exception_detector.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+RUN chmod a+rx /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+
+RUN mkdir -p /etc/fluent/configs.d/{dynamic,user} && \
+    chmod 777 /etc/fluent/configs.d/dynamic && \
+    ln -s /etc/fluent/configs.d/user/fluent.conf /etc/fluent/fluent.conf
+
+ADD jemalloc/ ${HOME}/jemalloc/
+# note - make dist "fails" here
+# false -o doc/jemalloc.html doc/html.xsl doc/jemalloc.xml
+# so cannot use &&
+# cannot use make install - will try to install docs - not only does that fail
+# for some reason, but we also don't want them here - use install_lib install_bin
+RUN cd ${HOME}/jemalloc && EXTRA_CFLAGS="$( rpm --eval '%{optflags}' )" ./autogen.sh && \
+    make dist ; make && make install_lib install_bin && cp COPYING ${HOME}/COPYING.jemalloc && \
+    cd .. && rm -rf jemalloc
+
+WORKDIR ${HOME}
+USER 0
+CMD ["sh", "run.sh"]
