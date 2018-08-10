@@ -2,6 +2,7 @@
 
 export MERGE_JSON_LOG=${MERGE_JSON_LOG:-true}
 CFG_DIR=/etc/fluent/configs.d
+ENABLE_PROMETHEUS_ENDPOINT=${ENABLE_PROMETHEUS_ENDPOINT:-"true"}
 OCP_OPERATIONS_PROJECTS=${OCP_OPERATIONS_PROJECTS:-"default openshift openshift-"}
 OCP_FLUENTD_TAGS=""
 for p in ${OCP_OPERATIONS_PROJECTS}; do
@@ -348,6 +349,11 @@ fi
 if [ "${COLLECT_JOURNAL_DEBUG_LOGS:-true}" = true ] ; then
   rm -f $CFG_DIR/openshift/filter-exclude-journal-debug.conf
   touch $CFG_DIR/openshift/filter-exclude-journal-debug.conf
+fi
+
+if [ "${ENABLE_PROMETHEUS_ENDPOINT}" != "true" ] ; then
+  echo "INFO: Disabling Prometheus endpint"
+  rm -f ${CFG_DIR}/openshift/input-pre-prometheus-metrics.conf
 fi
 
 issue_deprecation_warnings
