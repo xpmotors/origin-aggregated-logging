@@ -19,7 +19,7 @@ log() {
         shift
         lvl=$1
         shift
-        printf "[%.23s][%-5s][container.run            ] " "`date -u +'%F %T,%N'`" $lvl
+        printf "[%.23s][%-5s][container.run            ] " "`date +'%F %T,%N'`" $lvl
         echo "$@"
     fi
 }
