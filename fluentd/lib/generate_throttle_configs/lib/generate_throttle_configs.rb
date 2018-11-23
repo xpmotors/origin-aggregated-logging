@@ -177,13 +177,13 @@ def create_default_docker(input_conf_file, excluded, log, options={})
   @label @CONCAT
 </source>
 <label @CONCAT>
-  <filter kubernetes.**>
+  <filter time.kubernetes.**>
     @type concat
     key log
     partial_key logtag
     partial_value P
   </filter>
-  <match kubernetes.**>
+  <match time.kubernetes.**>
     @type relabel
     @label @INGRESS
   </match>
