@@ -1,0 +1,5 @@
+FROM openshift/origin-logging-kibana:v3.11.0
+
+MAINTAINER OpenShift Development <dev@lists.openshift.redhat.com>
+
+RUN sed -i s/"#elasticsearch.ssl.verificationMode: full"/"elasticsearch.ssl.verificationMode: none"/g /etc/kibana/kibana.yml
