@@ -45,6 +45,7 @@ RUN rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 && \
       fluent-plugin-systemd \
       fluent-plugin-viaq_data_model \
      'fluent-plugin-remote-syslog:1.1' \
+     'fluent-plugin-prometheus:1.0.1' \
      'fluent-plugin-detect-exceptions:0.0.11' \
      'fluent-plugin-out-http:0.2.0'
 
