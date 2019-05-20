@@ -1,20 +1,20 @@
 FROM xpmotors/centos:centos7-rb24
 
- MAINTAINER OpenShift Development <dev@lists.openshift.redhat.com>
+MAINTAINER OpenShift Development <dev@lists.openshift.redhat.com>
 
- ENV DATA_VERSION=1.6.0 \
-    FLUENTD_VERSION=0.12.42 \
+ENV DATA_VERSION=1.6.0 \
+    FLUENTD_VERSION=0.12.43 \
     GEM_HOME=/opt/app-root/src \
     HOME=/opt/app-root/src \
     PATH=/opt/app-root/src/bin:/opt/app-root/bin:$PATH \
-    OCP_OPERATIONS_PROJECTS='default openshift openshift-'
+    RUBY_VERSION=2.0
 
- LABEL io.k8s.description="Fluentd container for collecting of docker container logs" \
+LABEL io.k8s.description="Fluentd container for collecting of docker container logs" \
       io.k8s.display-name="Fluentd ${FLUENTD_VERSION}" \
       io.openshift.expose-services="9200:http, 9300:http" \
       io.openshift.tags="logging,elk,fluentd"
 
- # activesupport version 5.x requires ruby 2.2
+# activesupport version 5.x requires ruby 2.2
 # iproute needed for ip command to get ip addresses
 # autoconf redhat-rpm-config for building jemalloc
 RUN rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 && \
@@ -29,49 +29,59 @@ RUN rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 && \
       redhat-rpm-config && \
     yum clean all
 
- RUN mkdir -p ${HOME} && mkdir -p /etc/fluent/plugin && \
+ADD jemalloc/ ${HOME}/jemalloc/
+RUN cd ${HOME}/jemalloc && EXTRA_CFLAGS="$( rpm --eval '%{optflags}' )" ./autogen.sh && \
+    make install_lib_shared install_bin && cp COPYING ${HOME}/COPYING.jemalloc && \
+    cd .. && rm -rf jemalloc
+
+RUN mkdir -p ${HOME} && mkdir -p /etc/fluent/plugin && \
     gem install -N --conservative --minimal-deps --no-ri --no-doc \
-      activesupport \
-      public_suffix \
-     'elasticsearch-transport:<5' \
-     'elasticsearch-api:<5' \
-     'elasticsearch:<5' \
+     'activesupport:<5' \
+     'public_suffix:<3' \
+     'elasticsearch-transport:<6' \
+     'elasticsearch-api:<6' \
+     'elasticsearch:<6' \
       fluentd:${FLUENTD_VERSION} \
-     'fluent-plugin-elasticsearch' \
-      fluent-plugin-kubernetes_metadata_filter \
-      fluent-plugin-record-modifier \
-     'fluent-plugin-rewrite-tag-filter:1.6.0' \
+     'fluent-plugin-elasticsearch:<2.0.0' \
+     'fluent-plugin-kubernetes_metadata_filter:<2' \
+     'fluent-plugin-record-modifier:<1.0.0' \
+     'fluent-plugin-rewrite-tag-filter:<1.6.0' \
       fluent-plugin-secure-forward \
-      fluent-plugin-systemd \
+     'fluent-plugin-systemd:<0.1.0' \
       fluent-plugin-viaq_data_model \
      'fluent-plugin-remote-syslog:1.1' \
-     'fluent-plugin-prometheus:1.0.1' \
+     'fluent-plugin-prometheus:<1.0.0' \
      'fluent-plugin-detect-exceptions:0.0.11' \
-     'fluent-plugin-out-http:0.2.0'
+     'fluent-plugin-out-http:0.2.0' \
+     'fluent-plugin-multiprocess:0.2.2' \
+     'fluent-plugin-kafka:0.9.4'
 
- ADD configs.d/ /etc/fluent/configs.d/
-ADD filter_k8s_meta_for_mux_client.rb /etc/fluent/plugin/
-ADD out_syslog_buffered.rb out_syslog.rb /etc/fluent/plugin/
+ADD configs.d/ /etc/fluent/configs.d/
+ADD out_syslog_buffered.rb out_syslog.rb out_rawtcp.rb /etc/fluent/plugin/
 ADD parser_viaq_docker_audit.rb viaq_docker_audit.rb /etc/fluent/plugin/
-ADD run.sh generate_throttle_configs.rb generate_syslog_config.rb ${HOME}/
+ADD run.sh generate_syslog_config.rb ${HOME}/
+ADD lib/generate_throttle_configs/lib/*.rb ${HOME}/
+ADD lib/filter_parse_json_field/lib/*.rb /etc/fluent/plugin/
+ADD lib/filter_elasticsearch_genid_ext/lib/filter_elasticsearch_genid_ext.rb /etc/fluent/plugin/
+ADD patch/logger/log.rb ${GEM_HOME}/gems/fluentd-0.12.43/lib/fluent/
+ADD patch/logger/supervisor.rb ${GEM_HOME}/gems/fluentd-0.12.43/lib/fluent/
+ADD lib/filter_concat/lib/filter_concat.rb /etc/fluent/plugin/
+COPY utils/** /usr/local/bin/
+ADD patch/in_prometheus.rb ${GEM_HOME}/gems/fluent-plugin-prometheus-0.4.0/lib/fluent/plugin/
 
- COPY exception_detector.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
-RUN chmod a+rx /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
-
- RUN mkdir -p /etc/fluent/configs.d/{dynamic,user} && \
+RUN mkdir -p /etc/fluent/configs.d/{dynamic,user} && \
     chmod 777 /etc/fluent/configs.d/dynamic && \
     ln -s /etc/fluent/configs.d/user/fluent.conf /etc/fluent/fluent.conf
 
- ADD jemalloc/ ${HOME}/jemalloc/
-# note - make dist "fails" here
-# false -o doc/jemalloc.html doc/html.xsl doc/jemalloc.xml
-# so cannot use &&
-# cannot use make install - will try to install docs - not only does that fail
-# for some reason, but we also don't want them here - use install_lib install_bin
-RUN cd ${HOME}/jemalloc && EXTRA_CFLAGS="$( rpm --eval '%{optflags}' )" ./autogen.sh && \
-    make dist ; make && make install_lib install_bin && cp COPYING ${HOME}/COPYING.jemalloc && \
-    cd .. && rm -rf jemalloc
+RUN if [ ! -d /etc/fluent/plugin ] ; then \
+      mkdir -p /etc/fluent/plugin ; \
+    fi ; \
+    sniffer=$( gem contents fluent-plugin-elasticsearch|grep elasticsearch_simple_sniffer.rb ) ; \
+    cp $sniffer /etc/fluent/plugin/
 
- WORKDIR ${HOME}
+COPY exception_detector.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+RUN chmod a+rx /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+
+WORKDIR ${HOME}
 USER 0
 CMD ["sh", "run.sh"]
