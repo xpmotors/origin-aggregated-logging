@@ -54,7 +54,7 @@ RUN mkdir -p ${HOME} && mkdir -p /etc/fluent/plugin && \
      'fluent-plugin-detect-exceptions:0.0.11' \
      'fluent-plugin-out-http:0.2.0' \
      'fluent-plugin-multiprocess:0.2.2' \
-     'fluent-plugin-kafka:0.9.4'
+     'fluent-plugin-kafka:0.7.9'
 
 ADD configs.d/ /etc/fluent/configs.d/
 ADD out_syslog_buffered.rb out_syslog.rb out_rawtcp.rb /etc/fluent/plugin/
@@ -62,8 +62,11 @@ ADD parser_viaq_docker_audit.rb viaq_docker_audit.rb /etc/fluent/plugin/
 ADD run.sh generate_syslog_config.rb ${HOME}/
 ADD lib/generate_throttle_configs/lib/*.rb ${HOME}/
 ADD lib/filter_parse_json_field/lib/*.rb /etc/fluent/plugin/
-COPY utils/** ${HOME}/utils
-ADD patch/in_prometheus.rb ${GEM_HOME}/gems/fluent-plugin-prometheus-0.4.0/lib/fluent/plugin/
+COPY utils/** /usr/local/bin/
+ADD patch/in_prometheus.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-prometheus-0.4.0/lib/fluent/plugin/
+
+COPY exception_detector.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
+RUN chmod a+rx /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
 
 RUN mkdir -p /etc/fluent/configs.d/{dynamic,user} && \
     chmod 777 /etc/fluent/configs.d/dynamic && \
@@ -74,9 +77,6 @@ RUN if [ ! -d /etc/fluent/plugin ] ; then \
     fi ; \
     sniffer=$( gem contents fluent-plugin-elasticsearch|grep elasticsearch_simple_sniffer.rb ) ; \
     cp $sniffer /etc/fluent/plugin/
-
-COPY exception_detector.rb /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
-RUN chmod a+rx /usr/local/rbenv/versions/2.4.3/lib/ruby/gems/2.4.0/gems/fluent-plugin-detect-exceptions-0.0.11/lib/fluent/plugin/exception_detector.rb
 
 WORKDIR ${HOME}
 USER 0
