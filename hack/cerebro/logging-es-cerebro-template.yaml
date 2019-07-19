@@ -1,0 +1,228 @@
+---
+kind: Template
+apiVersion: v1
+metadata:
+  name: logging-es-cerebro
+  annotations:
+    openshift.io/display-name: Cerebro for Origin Aggregated Logging
+    description: cerebro is an open source(MIT License) elasticsearch web admin tool built using Scala, Play Framework, AngularJS and Bootstrap.
+    iconClass: icon-apache
+    template.openshift.io/long-description: cerebro is an open source(MIT License) elasticsearch web admin tool built using Scala, Play Framework, AngularJS and Bootstrap.
+labels:
+  template: logging-es-cerebro
+objects:
+- kind: OAuthClient
+  apiVersion: v1
+  metadata:
+    labels:
+      logging-infra: support
+    name: cerebro-proxy
+  redirectURIs:
+  - https://${CEREBRO_SECURE_URL}
+  respondWithChallenges: false
+  secret: ${OPENSHIFT_OAUTH_CLIENT_SECRET}
+  scopeRestrictions:
+  - literals:
+    - user:info
+    - user:check-access
+    - user:list-projects
+- kind: ServiceAccount
+  apiVersion: v1
+  metadata:
+    name: aggregated-logging-es-cerebro
+    labels:
+      logging: logging-es-cerebro
+    annotations:
+      serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"logging-es-cerebro"}}'
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: logging-es-cerebro
+    labels:
+      logging: logging-es-cerebro
+  spec:
+    host: ${CEREBRO_SECURE_URL}
+    to:
+      name: logging-es-cerebro
+    tls:
+      termination: Reencrypt
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: logging-es-cerebro
+    annotations:
+      description: Exposes and load balances the application pods
+    labels:
+      logging: logging-es-cerebro
+    annotations:
+      service.alpha.openshift.io/serving-cert-secret-name: proxy-tls
+  spec:
+    ports:
+    - name: proxy
+      port: 443
+      targetPort: 4443
+    selector:
+      logging: logging-es-cerebro
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: logging-es-cerebro
+    labels:
+      logging: logging-es-cerebro
+    annotations:
+      description: Defines how to deploy the application server
+  spec:
+    replicas: 1
+    selector:
+      name: logging-es-cerebro
+    template:
+      metadata:
+        name: logging-es-cerebro
+        labels:
+          name: logging-es-cerebro
+          logging: logging-es-cerebro
+      spec:
+        containers:
+        - name: logging-es-cerebro
+          image: 'docker.io/lmenezes/cerebro:${CEREBRO_IMAGE_TAG}'
+          args:
+            - '-Dhttp.address=0.0.0.0'
+            - '-Dconfig.file=/etc/cerebro/config/application.conf'
+          volumeMounts:
+          - mountPath: /etc/cerebro/certs
+            name: elasticsearch-secret
+            readOnly: true
+          - mountPath: /etc/cerebro/config
+            name: cerebro-config
+          - mountPath: /etc/cerebro/data
+            name: cerebro-data
+          resources:
+            limits:
+              memory: ${CEREBRO_MEMORY_LIMIT}
+        - name: logging-es-cerebro-auth-proxy
+          image: openshift/oauth-proxy:v1.0.0
+          imagePullPolicy: Always
+          args:
+          - --https-address=:4443
+          - -provider=openshift
+          - -client-id=cerebro-proxy
+          - -client-secret=${OPENSHIFT_OAUTH_CLIENT_SECRET}
+          - -upstream=http://localhost:9000
+          - '-openshift-sar={"namespace": "default", "verb": "create", "resource": "pods"}'
+          - --tls-cert=/etc/tls/private/tls.crt
+          - --tls-key=/etc/tls/private/tls.key
+          - --cookie-secret=${SESSION_SECRET}=
+          - -pass-access-token
+          ports:
+          - containerPort: 4443
+            name: cerebro-proxy
+            protocol: TCP
+          volumeMounts:
+          - mountPath: /etc/tls/private
+            name: proxy-tls
+            readOnly: true
+          resources:
+            limits:
+              memory: ${AUTH_PROXY_MEMORY_LIMIT}
+        volumes:
+        - name: elasticsearch-secret
+          secret:
+            secretName: logging-elasticsearch
+        - name: cerebro-config
+          configMap:
+            name: logging-es-cerebro-config
+            defaultMode: 0611
+        - name: proxy-tls
+          secret:
+            secretName: proxy-tls
+        - name: cerebro-data
+          emptyDir: {}
+    strategy:
+      type: Recreate
+    triggers:
+    - type: ConfigChange
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: logging-es-cerebro-config
+    labels:
+      logging: logging-es-cerebro
+      component: cerebro
+  data:
+    application.conf: |
+      secret = "${COOKIE_SECRET}"
+      basePath = "/"
+      pidfile.path=/dev/null
+      rest.history.size = 50
+      data.path = "/etc/cerebro/data/cerebro.db"
+      play.ws.ssl {
+        keyManager = {
+          stores = [
+            { type = "JKS", password="${KEYSTORE_PASSWORD}", path = "/etc/cerebro/certs/admin.jks" }
+          ]
+        },
+        trustManager = {
+          stores = [
+            { type = "JKS", password="${TRUSTSTORE_PASSWORD}", path = "/etc/cerebro/certs/truststore" }
+          ]
+        }
+      }
+      es = {
+        gzip = true
+      }
+      auth = {
+      }
+      hosts = [
+        {
+          host = "https://${ES_SERVICE_NAME}:${ES_SERVICE_PORT}"
+          name = "${ES_SERVICE_NAME} Elasticsearch cluster"
+        }
+      ]
+parameters:
+- name: CEREBRO_SECURE_URL
+  displayName: Cerebro public URL
+  description: The public URL for the Openshift OAuth Provider. Enter value without https://
+  required: true
+- name: CEREBRO_IMAGE_TAG
+  displayName: Cerebro image tag
+  description: Set this to select the Cerebro image tag
+  value: "0.8.3"
+- name: CEREBRO_MEMORY_LIMIT
+  displayName: Memory Limit for Cerebro container
+  description: Maximum amount of memory the Cerebro container can use.
+  required: true
+  value: 512Mi
+- name: AUTH_PROXY_MEMORY_LIMIT
+  displayName: Memory Limit for Openshift Auth Proxy container
+  description: Maximum amount of memory the Auth Proxy container can use.
+  required: true
+  value: 128Mi
+- name: ES_SERVICE_NAME
+  displayName: The Elasticsearch service name
+  description: Optionally use this variable to change the service name. Default is logging-es.
+  value: logging-es
+  required: true
+- name: ES_SERVICE_PORT
+  displayName: The Elasticsearch service port
+  description: Optionally use this variable to change the service port. Default is 9200.
+  value: "9200"
+- name: SESSION_SECRET
+  description: The session secret for the proxy. Generated automatically.
+  generate: "expression"
+  from: "[a-zA-Z0-9]{43}"
+- name: OPENSHIFT_OAUTH_CLIENT_SECRET
+  description: Oauth client secret. Generated automatically.
+  from: "user[a-zA-Z0-9]{64}"
+  generate: "expression"
+- name: KEYSTORE_PASSWORD
+  description: "The keystore password"
+  value: "kspass"
+  required: true
+- name: TRUSTSTORE_PASSWORD
+  description: "The truststore password"
+  value: "tspass"
+  required: true
+- name: COOKIE_SECRET
+  description: "Password for cerebro session cookie"
+  from: "[a-zA-Z0-9]{64}"
+  generate: "expression"
